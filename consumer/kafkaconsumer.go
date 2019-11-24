@@ -37,7 +37,7 @@ func (p *ConfluentKafkaConsumerProvider) GetKafkaConsumer(broker, group string, 
 		panic(err)
 	}
 
-	return &ConfluentKafkaConsumer{consumer: c, pollTimeoutMS: 100, maxPendingMessageCount: 1}
+	return &ConfluentKafkaConsumer{consumer: c, pollTimeoutMS: 100, maxPendingMessageCount: 10}
 }
 
 type ConfluentKafkaConsumer struct {

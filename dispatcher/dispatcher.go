@@ -11,27 +11,26 @@ import (
 
 type Counter struct {
 	sync.Mutex
-	Count int
+	count int
 }
 
-func (d *Counter) increment() {
+func (d *Counter) Increment() {
 	d.Lock()
 	defer d.Unlock()
-	d.Count += 1
+	d.count += 1
 }
 
-func (d *Counter) decrement() {
+func (d *Counter) Decrement() {
 	d.Lock()
 	defer d.Unlock()
-	d.Count -= 1
+	d.count -= 1
 }
 
-func (d *Counter) count() int {
-	return d.Count
+func (d *Counter) GetCount() int {
+	return d.count
 }
 
 type Dispatcher struct {
-	// A pool of Workers channels that are registered with the dispatchers
 	WorkerPoolChannel        chan *worker.Worker
 	MaxWorkers               int
 	JobQueueChannel          chan model.Job
@@ -48,7 +47,7 @@ func NewDispatcher(maxWorkers, maxQueue int) *Dispatcher {
 	quit := make(chan bool)
 	dispatchingStopped := make(chan bool)
 	return &Dispatcher{
-		JobCounter:        &Counter{Count: 0},
+		JobCounter:        &Counter{count: 0},
 		WorkerPoolChannel: pool,
 		JobQueueChannel: jobQueue,
 		MaxWorkers: maxWorkers,
@@ -59,7 +58,7 @@ func NewDispatcher(maxWorkers, maxQueue int) *Dispatcher {
 }
 
 func (d *Dispatcher) Run() {
-	// starting n number of workers
+
 	for i := 0; i < d.MaxWorkers; i++ {
 		workerInstance := worker.NewWorker(d.WorkerPoolChannel, i)
 		d.Workers = append(d.Workers, workerInstance)
@@ -70,7 +69,7 @@ func (d *Dispatcher) Run() {
 }
 
 func (d *Dispatcher) MaxPendingJobCount() int{
-	return d.JobCounter.count()
+	return d.JobCounter.GetCount()
 }
 
 func (d *Dispatcher) Stop() {
@@ -78,11 +77,11 @@ func (d *Dispatcher) Stop() {
 	close(d.JobQueueChannel)
 
 	for len(d.JobQueueChannel) > 0 {
-		fmt.Println(" dispatchers is waiting for JobQueueChannel to be empty")
+		fmt.Println(" dispatcher is waiting for JobQueueChannel to be empty")
 	}
 
-	for d.JobCounter.count() > 0 {
-		fmt.Println(fmt.Sprintf(" dispatchers is waiting for JobCounter count to be zero : %d", d.JobCounter.count()))
+	for d.JobCounter.GetCount() > 0 {
+		fmt.Println(fmt.Sprintf(" dispatcher is waiting for JobCounter GetCount to be zero : %d", d.JobCounter.GetCount()))
 		time.Sleep(time.Millisecond * 100)
 	}
 
@@ -103,7 +102,7 @@ func (d *Dispatcher) Stop() {
 
 func (d *Dispatcher) dispatch() {
 	defer func() {
-		fmt.Println("dispatchers is stopped")
+		fmt.Println("dispatcher is stopped")
 		d.DispatcherStoppedChannel <- true
 	}()
 
@@ -113,17 +112,18 @@ func (d *Dispatcher) dispatch() {
 			if ok {
 				// a job request has been received
 				go func(job model.Job) {
-					d.JobCounter.increment()
+					d.JobCounter.Increment()
 					// try to obtain a workers job channel that is available.
 					// this will block until a workers is idle
 					workerInstance := <-d.WorkerPoolChannel
 					workerInstance.JobChannel <- job
-					d.JobCounter.decrement()
+					d.JobCounter.Decrement()
 				}(job)
 			}
 
 		case <-d.QuitChannel:
 			if len(d.JobQueueChannel) == 0 {
+				fmt.Println("dispatcher JobQueueChannel is empty")
 				return
 			}
 		}

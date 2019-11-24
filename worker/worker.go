@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-
 type Worker struct {
 	WorkerPoolChannel    chan *Worker
 	JobChannel           chan model.Job
@@ -15,7 +14,6 @@ type Worker struct {
 	QuitChannel          chan bool
 	WorkerStoppedChannel chan bool
 }
-
 
 func NewWorker(workerPool chan *Worker, id int) *Worker {
 	return &Worker{
@@ -27,8 +25,6 @@ func NewWorker(workerPool chan *Worker, id int) *Worker {
 	}
 }
 
-// Start method starts the run loop for the workers, listening for a quitChannel channel in
-// case we need to stop it
 func (worker *Worker) Start() {
 	go func(w *Worker) {
 		defer func() {
@@ -39,20 +35,18 @@ func (worker *Worker) Start() {
 		fmt.Println(fmt.Sprintf("workers %d is starting", w.Id))
 
 		for {
-			// register the current workers into the workers queue.
+
 			w.WorkerPoolChannel <- w
 
 			select {
 			case job := <-w.JobChannel:
-				// we have received a work request.
-				//if err := job.Payload.UploadToS3(); err != nil {
-				//	log.Errorf("Error uploading to S3: %s", err.Error())
-				//}
+
 				fmt.Println(fmt.Sprintf("workers %d is processing job : %v", w.Id, job))
 				time.Sleep(time.Millisecond * 1000)
 
 			case <-w.QuitChannel:
 				if len(w.JobChannel) == 0 {
+					fmt.Println(fmt.Sprintf("workers %d JobChannel is empty", w.Id))
 					return
 				}
 			}
@@ -60,12 +54,11 @@ func (worker *Worker) Start() {
 	}(worker)
 }
 
-// Stop signals the workers to stop listening for work requests.
 func (worker *Worker) Stop(waitGroup *sync.WaitGroup) {
 	go func(w *Worker, wg *sync.WaitGroup) {
 		fmt.Println(fmt.Sprintf("workers %d is stopping", w.Id))
 
-		for len(w.JobChannel) > 0{
+		for len(w.JobChannel) > 0 {
 			fmt.Println(fmt.Sprintf("workers %d is waiting for JobChannel to be empty", w.Id))
 		}
 
