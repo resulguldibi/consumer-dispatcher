@@ -1,10 +1,10 @@
 package dispatcher
 
 import (
+	"consumer-dispatcher/model"
+	"consumer-dispatcher/worker"
+	_ "consumer-dispatcher/worker"
 	"fmt"
-	"golang-lab/consumer-dispatcher/model"
-	"golang-lab/consumer-dispatcher/worker"
-	_ "golang-lab/consumer-dispatcher/worker"
 	"sync"
 	"time"
 )
@@ -47,12 +47,12 @@ func NewDispatcher(maxWorkers, maxQueue int) *Dispatcher {
 	quit := make(chan bool)
 	dispatchingStopped := make(chan bool)
 	return &Dispatcher{
-		JobCounter:        &Counter{count: 0},
-		WorkerPoolChannel: pool,
-		JobQueueChannel: jobQueue,
-		MaxWorkers: maxWorkers,
-		Workers: workers,
-		QuitChannel: quit,
+		JobCounter:               &Counter{count: 0},
+		WorkerPoolChannel:        pool,
+		JobQueueChannel:          jobQueue,
+		MaxWorkers:               maxWorkers,
+		Workers:                  workers,
+		QuitChannel:              quit,
 		DispatcherStoppedChannel: dispatchingStopped,
 	}
 }
@@ -68,7 +68,7 @@ func (d *Dispatcher) Run() {
 	go d.dispatch()
 }
 
-func (d *Dispatcher) MaxPendingJobCount() int{
+func (d *Dispatcher) MaxPendingJobCount() int {
 	return d.JobCounter.GetCount()
 }
 

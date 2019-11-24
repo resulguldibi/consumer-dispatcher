@@ -1,0 +1,14 @@
+{
+	"version": 0,
+	"dependencies": [
+		{
+			"importpath": "github.com/confluentinc/confluent-kafka-go/kafka",
+			"repository": "https://github.com/confluentinc/confluent-kafka-go",
+			"vcs": "git",
+			"revision": "7d2340912ba4a7a3437b775f304cba425d85ecd0",
+			"branch": "master",
+			"path": "/kafka",
+			"notests": true
+		}
+	]
+}

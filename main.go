@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"golang-lab/consumer-dispatcher/consumer"
-	"golang-lab/consumer-dispatcher/dispatcher"
-	"golang-lab/consumer-dispatcher/model"
-	"golang-lab/consumer-dispatcher/producer"
+	"consumer-dispatcher/consumer"
+	"consumer-dispatcher/dispatcher"
+	"consumer-dispatcher/model"
+	"consumer-dispatcher/producer"
 	"os"
 	"os/signal"
 	"strconv"
@@ -51,7 +51,7 @@ func init() {
 	maxWorker = 5
 	maxQueue = 100
 	topic = "Test_Topic2"
-	broker = "localhost:9092"
+	broker = "kafka:9092"
 	group = "test-group"
 	jobDispatcher = dispatcher.NewDispatcher(maxWorker, maxQueue)
 

@@ -2,7 +2,7 @@ package worker
 
 import (
 	"fmt"
-	"golang-lab/consumer-dispatcher/model"
+	"consumer-dispatcher/model"
 	"sync"
 	"time"
 )
