@@ -1,10 +1,9 @@
 package dispatcher
 
 import (
-	"consumer-dispatcher/model"
-	"consumer-dispatcher/worker"
-	_ "consumer-dispatcher/worker"
 	"fmt"
+	"github.com/resulguldibi/consumer-dispatcher/model"
+	"github.com/resulguldibi/consumer-dispatcher/worker"
 	"sync"
 	"time"
 )

@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"consumer-dispatcher/consumer"
-	"consumer-dispatcher/dispatcher"
-	"consumer-dispatcher/model"
-	"consumer-dispatcher/producer"
+	"github.com/resulguldibi/consumer-dispatcher/consumer"
+	"github.com/resulguldibi/consumer-dispatcher/dispatcher"
+	"github.com/resulguldibi/consumer-dispatcher/model"
+	"github.com/resulguldibi/consumer-dispatcher/producer"
 	"os"
 	"os/signal"
 	"strconv"
@@ -51,7 +51,7 @@ func init() {
 	maxWorker = 5
 	maxQueue = 100
 	topic = "Test_Topic2"
-	broker = "kafka:9092"
+	broker = "localhost:9092"
 	group = "test-group"
 	jobDispatcher = dispatcher.NewDispatcher(maxWorker, maxQueue)
 
@@ -67,7 +67,7 @@ func init() {
 
 	//region kafka consumer
 	kafkaProducerProvider = &producer.ConfluentKafkaProducerProvider{}
-	kafkaProducer = kafkaProducerProvider.GetKafkaProducer("localhost:9092")
+	kafkaProducer = kafkaProducerProvider.GetKafkaProducer(broker)
 	kafkaProducerMessageChannel = make(chan interface{})
 	kafkaProducerErrorChannel = make(chan interface{})
 	//endregion

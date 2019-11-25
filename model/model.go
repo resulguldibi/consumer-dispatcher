@@ -1,7 +1,5 @@
 package model
 
-
-
 type Job struct {
 	Payload Payload
 }

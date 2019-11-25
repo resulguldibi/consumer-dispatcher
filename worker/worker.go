@@ -2,7 +2,7 @@ package worker
 
 import (
 	"fmt"
-	"consumer-dispatcher/model"
+	"github.com/resulguldibi/consumer-dispatcher/model"
 	"sync"
 	"time"
 )
