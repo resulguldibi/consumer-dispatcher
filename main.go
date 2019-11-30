@@ -33,6 +33,7 @@ var kafkaProducerProvider producer.IKafkaProducerProvider
 var kafkaProducer producer.IKafkaProducer
 var kafkaProducerMessageChannel chan interface{}
 var kafkaProducerErrorChannel chan interface{}
+var kafkaProducerSignalChannel chan os.Signal
 
 //endregion
 
@@ -70,6 +71,9 @@ func init() {
 	kafkaProducer = kafkaProducerProvider.GetKafkaProducer(broker)
 	kafkaProducerMessageChannel = make(chan interface{})
 	kafkaProducerErrorChannel = make(chan interface{})
+	kafkaProducerSignalChannel = make(chan os.Signal, 1)
+	signal.Notify(kafkaProducerSignalChannel, syscall.SIGINT, syscall.SIGTERM)
+
 	//endregion
 
 }
@@ -86,23 +90,22 @@ func main() {
 		stoppedChannel := make(chan bool)
 		go func() {
 
+			index := 0
+
 			defer func() {
+				fmt.Println("producer stopped")
 				stoppedChannel <- true
 			}()
 
-			index := 0
-
 			for {
 
-				kafkaProducer.Produce(&kafka.Message{
-					TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-					Value:          []byte(strconv.Itoa(index)),
-				}, kafkaProducerMessageChannel, kafkaProducerErrorChannel)
+				message := &consumer.CustomKafkaMessage{Value: []byte(strconv.Itoa(index)), Partition: kafka.PartitionAny, Topic: topic}
+				kafkaProducer.Produce(message, kafkaProducerMessageChannel, kafkaProducerErrorChannel)
 
 				select {
 
-				case sgnl := <-kafkaConsumerSignalChannel:
-					fmt.Println("signal : ", sgnl)
+				case sgnl := <-kafkaProducerSignalChannel:
+					fmt.Println("producer signal : ", sgnl)
 					return
 				case err := <-kafkaProducerErrorChannel:
 					fmt.Println("produer error ->", err)
@@ -124,20 +127,21 @@ func main() {
 		stoppedChannel := make(chan bool)
 		go func() {
 			defer func() {
+				fmt.Println("consumer stopped")
 				stoppedChannel <- true
 			}()
 			for {
 				select {
 				case message := <-kafkaConsumerMessageChannel:
 					//fmt.Println("message : ", message)
-					job := model.Job{Payload: model.Payload{Name: string(message.(*kafka.Message).Value)}}
+					job := model.Job{Payload: model.Payload{Name: string(message.(consumer.ICustomKafkaMessage).GetValue())}}
 					jobDispatcher.JobQueueChannel <- job
 				case err := <-kafkaConsumerErrorChannel:
 					fmt.Println("error : ", err)
 				case ignore := <-kafkaConsumerIgnoreChannel:
 					fmt.Println("ignore : ", ignore)
 				case sgnl := <-kafkaConsumerSignalChannel:
-					fmt.Println("signal : ", sgnl)
+					fmt.Println("consumer signal : ", sgnl)
 					return
 				}
 			}

@@ -2,7 +2,9 @@ package consumer
 
 import (
 	"fmt"
+	"github.com/bsm/sarama-cluster"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"strings"
 	"time"
 )
 
@@ -12,6 +14,41 @@ type IKafkaConsumerProvider interface {
 
 type IKafkaConsumer interface {
 	Consume(messageChannel chan interface{}, errorChannel chan interface{}, ignoreChannel chan interface{}, maxPendingJobCount func() int)
+}
+
+type ICustomKafkaMessage interface {
+	GetKey() []byte
+	GetValue() []byte
+	GetTopic() string
+	GetPartition() int32
+	GetOffset() int64
+}
+
+type CustomKafkaMessage struct {
+	Key, Value []byte
+	Topic      string
+	Partition  int32
+	Offset     int64
+}
+
+func (m *CustomKafkaMessage) GetKey() []byte{
+	return m.Key
+}
+
+func (m *CustomKafkaMessage) GetValue() []byte{
+	return m.Value
+}
+
+func (m *CustomKafkaMessage) GetTopic() string{
+	return m.Topic
+}
+
+func (m *CustomKafkaMessage) GetPartition() int32{
+	return m.Partition
+}
+
+func (m *CustomKafkaMessage) GetOffset() int64{
+	return m.Offset
 }
 
 //region confluent-kafka implementation
@@ -70,7 +107,8 @@ func (c *ConfluentKafkaConsumer) Consume(messageChannel chan interface{}, errorC
 
 				switch e := ev.(type) {
 				case *kafka.Message:
-					messageChannel <- e
+					msg := &CustomKafkaMessage{Key:e.Key,Value:e.Value}
+					messageChannel <- msg
 				case kafka.Error:
 					errorChannel <- e
 				default:
@@ -79,6 +117,82 @@ func (c *ConfluentKafkaConsumer) Consume(messageChannel chan interface{}, errorC
 			}
 		}
 	}()
+}
+
+//endregion
+
+//region sarama-cluster implementation
+
+type SaramaClusterConsumerProvider struct {
+}
+
+func (p *SaramaClusterConsumerProvider) GetKafkaConsumer(broker, group string, topics []string) IKafkaConsumer {
+	config := cluster.NewConfig()
+	config.Consumer.Return.Errors = true
+	config.Group.Return.Notifications = true
+
+	var brokers []string
+	if strings.Contains(broker, ",") {
+		brokers = strings.Split(broker, ",")
+	} else {
+		brokers = make([]string, 0)
+		brokers = append(brokers, broker)
+	}
+
+	c, err := cluster.NewConsumer(brokers, group, topics, config)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return &SaramaClusterConsumer{consumer: c, maxPendingMessageCount: 10}
+}
+
+type SaramaClusterConsumer struct {
+	consumer               *cluster.Consumer
+	maxPendingMessageCount int
+}
+
+func (c *SaramaClusterConsumer) Consume(messageChannel chan interface{}, errorChannel chan interface{}, ignoreChannel chan interface{}, maxPendingJobCount func() int) {
+
+	go func() {
+		defer func() {
+			fmt.Println("consumer is stopped")
+		}()
+
+		go func() {
+			for err := range c.consumer.Errors() {
+				errorChannel <- err
+			}
+		}()
+
+		go func() {
+			for ntf := range c.consumer.Notifications() {
+				ignoreChannel <- ntf
+			}
+		}()
+
+		for {
+			select {
+			default:
+
+				if maxPendingJobCount() > c.maxPendingMessageCount {
+					fmt.Println("waiting for maxPendingMessageCount")
+					time.Sleep(time.Millisecond * 50)
+					continue
+				}
+
+				msg, ok := <-c.consumer.Messages()
+				if !ok {
+					continue
+				}
+
+				message := &CustomKafkaMessage{Key:msg.Key,Value:msg.Value}
+				messageChannel <- message
+			}
+		}
+	}()
+
 }
 
 //endregion
