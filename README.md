@@ -1,4 +1,5 @@
-#consumer-dispatcher
+# consumer-dispatcher
+
 This sample contains kafka producer, kafka consumer, dispatcher and worker(s).
 
 - kafka producer : produces messages and then sends these messages to kafka topic.
