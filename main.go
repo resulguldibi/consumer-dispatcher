@@ -57,7 +57,7 @@ func init() {
 	jobDispatcher = dispatcher.NewDispatcher(maxWorker, maxQueue)
 
 	//region kafka consumer
-	kafkaConsumerProvider = &consumer.ConfluentKafkaConsumerProvider{}
+	kafkaConsumerProvider = &consumer.SaramaKafkaConsumerProvider{}
 	kafkaConsumer = kafkaConsumerProvider.GetKafkaConsumer(broker, group, []string{topic})
 	kafkaConsumerMessageChannel = make(chan interface{})
 	kafkaConsumerErrorChannel = make(chan interface{})
