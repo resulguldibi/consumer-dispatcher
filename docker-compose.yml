@@ -7,6 +7,14 @@ services:
         restart: always
         ports:
             - 2181:2181
+    consumer-dispatcher:
+        image: resulguldibi/consumer-dispatcher
+        container_name: consumer-dispatcher
+        restart: always
+        depends_on:
+            - kafka
+        links:
+            - kafka
     kafka:
         image: wurstmeister/kafka
         container_name: kafka

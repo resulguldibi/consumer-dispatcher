@@ -52,7 +52,7 @@ func init() {
 	maxWorker = 5
 	maxQueue = 100
 	topic = "Test_Topic2"
-	broker = "localhost:9092"
+	broker = "kafka:9092"
 	group = "test-group"
 	jobDispatcher = dispatcher.NewDispatcher(maxWorker, maxQueue)
 
