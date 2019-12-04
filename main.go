@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/Shopify/sarama"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/resulguldibi/consumer-dispatcher/consumer"
 	"github.com/resulguldibi/consumer-dispatcher/dispatcher"
@@ -25,6 +26,7 @@ var kafkaConsumerMessageChannel chan interface{}
 var kafkaConsumerErrorChannel chan interface{}
 var kafkaConsumerIgnoreChannel chan interface{}
 var kafkaConsumerSignalChannel chan os.Signal
+var kafkaConsumerProviderError error
 
 //endregion
 
@@ -57,8 +59,22 @@ func init() {
 	jobDispatcher = dispatcher.NewDispatcher(maxWorker, maxQueue)
 
 	//region kafka consumer
-	kafkaConsumerProvider = &consumer.SaramaKafkaConsumerProvider{}
-	kafkaConsumer = kafkaConsumerProvider.GetKafkaConsumer(broker, group, []string{topic})
+	options := make(map[string]interface{})
+	options["config.consumer.offsets.initial"] = sarama.OffsetNewest
+	kafkaConsumerProvider = &consumer.SaramaKafkaConsumerProvider{KafkaConsumerProvider: &consumer.KafkaConsumerProvider{
+		KafkaVersion:           "2.3.0",
+		EnableThrottling:       true,
+		MaxPendingMessageCount: 10,
+		WaitingTimeMsWhenMaxPendingMessageCountReached: 50,
+		PollTimeoutMS: 100,
+		Options:       options,
+	}}
+	kafkaConsumer, kafkaConsumerProviderError = kafkaConsumerProvider.GetKafkaConsumer(broker, group, []string{topic})
+
+	if kafkaConsumerProviderError != nil {
+		panic(kafkaConsumerProviderError)
+	}
+
 	kafkaConsumerMessageChannel = make(chan interface{})
 	kafkaConsumerErrorChannel = make(chan interface{})
 	kafkaConsumerIgnoreChannel = make(chan interface{})
