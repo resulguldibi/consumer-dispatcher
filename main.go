@@ -8,15 +8,17 @@ import (
 	"github.com/resulguldibi/consumer-dispatcher/dispatcher"
 	"github.com/resulguldibi/consumer-dispatcher/model"
 	"github.com/resulguldibi/consumer-dispatcher/producer"
+	"github.com/resulguldibi/consumer-dispatcher/worker"
 	"os"
 	"os/signal"
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 )
 
 var maxWorker, maxQueue int
-var jobDispatcher *dispatcher.Dispatcher
+var jobDispatcher dispatcher.IDispatcher
 var topic, broker, group string
 
 //region kafka consumer
@@ -54,9 +56,15 @@ func init() {
 	maxWorker = 5
 	maxQueue = 100
 	topic = "Test_Topic2"
-	broker = "kafka:9092"
+	broker = "localhost:9092"
 	group = "test-group"
-	jobDispatcher = dispatcher.NewDispatcher(maxWorker, maxQueue)
+	jobDispatcher = dispatcher.NewDispatcher(maxWorker, maxQueue, func(worker worker.IWorker, job model.IJob) {
+		defer func() {
+			job.GetIsCompletedChannel() <- true
+		}()
+		fmt.Println(fmt.Sprintf("workers %d is processing job : %v", worker.GetId(), job))
+		time.Sleep(time.Millisecond * 1)
+	})
 
 	//region kafka consumer
 	options := make(map[string]interface{})
@@ -150,8 +158,11 @@ func main() {
 				select {
 				case message := <-kafkaConsumerMessageChannel:
 					//fmt.Println("message : ", message)
-					job := model.Job{Payload: model.Payload{Name: string(message.(consumer.ICustomKafkaMessage).GetValue())}}
-					jobDispatcher.JobQueueChannel <- job
+					job := &model.Job{Payload: model.Payload{
+						Name: string(message.(consumer.ICustomKafkaMessage).GetValue())}, IsCompletedChannel: make(chan bool)}
+					jobDispatcher.GetJobQueueChannel() <- job
+					<-job.IsCompletedChannel
+					close(job.IsCompletedChannel)
 				case err := <-kafkaConsumerErrorChannel:
 					fmt.Println("error : ", err)
 				case ignore := <-kafkaConsumerIgnoreChannel:

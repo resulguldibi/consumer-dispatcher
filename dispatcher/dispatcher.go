@@ -8,58 +8,112 @@ import (
 	"time"
 )
 
-type Counter struct {
+type ICounter interface {
+	GetCount() int
+	Increment()
+	Decrement()
+}
+
+type counter struct {
 	sync.Mutex
 	count int
 }
 
-func (d *Counter) Increment() {
+func (d *counter) Increment() {
 	d.Lock()
 	defer d.Unlock()
 	d.count += 1
 }
 
-func (d *Counter) Decrement() {
+func (d *counter) Decrement() {
 	d.Lock()
 	defer d.Unlock()
 	d.count -= 1
 }
 
-func (d *Counter) GetCount() int {
+func (d *counter) GetCount() int {
 	return d.count
 }
 
-type Dispatcher struct {
-	WorkerPoolChannel        chan *worker.Worker
-	MaxWorkers               int
-	JobQueueChannel          chan model.Job
-	Workers                  []*worker.Worker
-	QuitChannel              chan bool
-	DispatcherStoppedChannel chan bool
-	JobCounter               *Counter
+type IDispatcher interface {
+	GetWorkerPoolChannel() chan worker.IWorker
+	GetMaxWorkers() int
+	GetJobQueueChannel() chan model.IJob
+	GetWorkers() []worker.IWorker
+	GetQuitChannel() chan bool
+	GetDispatcherStoppedChannel() chan bool
+	GetJobCounter() ICounter
+	Run()
+	MaxPendingJobCount() int
+	Stop()
+	GetWorkerTask() func(worker worker.IWorker, job model.IJob)
 }
 
-func NewDispatcher(maxWorkers, maxQueue int) *Dispatcher {
-	pool := make(chan *worker.Worker, maxWorkers)
-	jobQueue := make(chan model.Job, maxQueue)
-	workers := make([]*worker.Worker, 0, maxWorkers)
+type dispatcher struct {
+	WorkerPoolChannel        chan worker.IWorker
+	MaxWorkers               int
+	JobQueueChannel          chan model.IJob
+	Workers                  []worker.IWorker
+	QuitChannel              chan bool
+	DispatcherStoppedChannel chan bool
+	JobCounter               *counter
+	WorkerTask               func(worker worker.IWorker, job model.IJob)
+}
+
+func (d *dispatcher) GetWorkerPoolChannel() chan worker.IWorker {
+	return d.WorkerPoolChannel
+}
+
+func (d *dispatcher) GetMaxWorkers() int {
+	return d.MaxWorkers
+}
+
+func (d *dispatcher) GetJobQueueChannel() chan model.IJob {
+	return d.JobQueueChannel
+}
+
+func (d *dispatcher) GetWorkers() []worker.IWorker {
+	return d.Workers
+}
+
+func (d *dispatcher) GetQuitChannel() chan bool {
+	return d.QuitChannel
+}
+
+func (d *dispatcher) GetDispatcherStoppedChannel() chan bool {
+	return d.DispatcherStoppedChannel
+}
+
+func (d *dispatcher) GetJobCounter() ICounter {
+	return d.JobCounter
+}
+
+func (d *dispatcher) GetWorkerTask() func(worker worker.IWorker, job model.IJob) {
+	return d.WorkerTask
+}
+
+func NewDispatcher(maxWorkers, maxQueue int, workerTask func(worker worker.IWorker, job model.IJob)) IDispatcher {
+	pool := make(chan worker.IWorker, maxWorkers)
+	jobQueue := make(chan model.IJob, maxQueue)
+	workers := make([]worker.IWorker, 0, maxWorkers)
 	quit := make(chan bool)
 	dispatchingStopped := make(chan bool)
-	return &Dispatcher{
-		JobCounter:               &Counter{count: 0},
+	return &dispatcher{
+		JobCounter:               &counter{count: 0},
 		WorkerPoolChannel:        pool,
 		JobQueueChannel:          jobQueue,
 		MaxWorkers:               maxWorkers,
 		Workers:                  workers,
 		QuitChannel:              quit,
 		DispatcherStoppedChannel: dispatchingStopped,
+		WorkerTask:               workerTask,
 	}
 }
 
-func (d *Dispatcher) Run() {
+func (d *dispatcher) Run() {
 
 	for i := 0; i < d.MaxWorkers; i++ {
-		workerInstance := worker.NewWorker(d.WorkerPoolChannel, i)
+		workerInstance := worker.NewWorker(d.WorkerPoolChannel, i, d.WorkerTask)
 		d.Workers = append(d.Workers, workerInstance)
 		workerInstance.Start()
 	}
@@ -67,11 +121,11 @@ func (d *Dispatcher) Run() {
 	go d.dispatch()
 }
 
-func (d *Dispatcher) MaxPendingJobCount() int {
+func (d *dispatcher) MaxPendingJobCount() int {
 	return d.JobCounter.GetCount()
 }
 
-func (d *Dispatcher) Stop() {
+func (d *dispatcher) Stop() {
 
 	close(d.JobQueueChannel)
 
@@ -99,7 +153,7 @@ func (d *Dispatcher) Stop() {
 	close(d.WorkerPoolChannel)
 }
 
-func (d *Dispatcher) dispatch() {
+func (d *dispatcher) dispatch() {
 	defer func() {
 		fmt.Println("dispatcher is stopped")
 		d.DispatcherStoppedChannel <- true
@@ -110,13 +164,14 @@ func (d *Dispatcher) dispatch() {
 		case job, ok := <-d.JobQueueChannel:
 			if ok {
 				// a job request has been received
-				go func(job model.Job) {
+				go func(job model.IJob) {
 					d.JobCounter.Increment()
+					defer d.JobCounter.Decrement()
 					// try to obtain a workers job channel that is available.
 					// this will block until a workers is idle
 					workerInstance := <-d.WorkerPoolChannel
-					workerInstance.JobChannel <- job
-					d.JobCounter.Decrement()
+					workerInstance.GetJobChannel() <- job
+
 				}(job)
 			}
 
