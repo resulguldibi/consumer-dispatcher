@@ -50,6 +50,7 @@ type IDispatcher interface {
 }
 
 type dispatcher struct {
+	Name                     string
 	WorkerPoolChannel        chan worker.IWorker
 	MaxWorkers               int
 	JobQueueChannel          chan model.IJob
@@ -92,13 +93,14 @@ func (d *dispatcher) GetWorkerTask() func(worker worker.IWorker, job model.IJob)
 	return d.WorkerTask
 }
 
-func NewDispatcher(maxWorkers, maxQueue int, workerTask func(worker worker.IWorker, job model.IJob)) IDispatcher {
+func NewDispatcher(name string, maxWorkers, maxQueue int, workerTask func(worker worker.IWorker, job model.IJob)) IDispatcher {
 	pool := make(chan worker.IWorker, maxWorkers)
 	jobQueue := make(chan model.IJob, maxQueue)
 	workers := make([]worker.IWorker, 0, maxWorkers)
 	quit := make(chan bool)
 	dispatchingStopped := make(chan bool)
 	return &dispatcher{
+		Name:                     name,
 		JobCounter:               &counter{count: 0},
 		WorkerPoolChannel:        pool,
 		JobQueueChannel:          jobQueue,
@@ -113,7 +115,7 @@ func NewDispatcher(maxWorkers, maxQueue int, workerTask func(worker worker.IWork
 func (d *dispatcher) Run() {
 
 	for i := 0; i < d.MaxWorkers; i++ {
-		workerInstance := worker.NewWorker(d.WorkerPoolChannel, i, d.WorkerTask)
+		workerInstance := worker.NewWorker(d.WorkerPoolChannel, i,d.Name, d.WorkerTask)
 		d.Workers = append(d.Workers, workerInstance)
 		workerInstance.Start()
 	}

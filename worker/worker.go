@@ -10,6 +10,7 @@ type IWorker interface {
 	GetWorkerPoolChannel() chan IWorker
 	GetJobChannel() chan model.IJob
 	GetId() int
+	GetName() string
 	GetQuitChannel() chan bool
 	GetWorkerStoppedChannel() chan bool
 	Start()
@@ -17,7 +18,7 @@ type IWorker interface {
 	GetWorkerTask() func(worker IWorker, job model.IJob)
 }
 
-func NewWorker(workerPool chan IWorker, id int, workerTask func(worker IWorker, job model.IJob)) IWorker {
+func NewWorker(workerPool chan IWorker, id int, name string, workerTask func(worker IWorker, job model.IJob)) IWorker {
 	return &worker{
 		WorkerPoolChannel:    workerPool,
 		JobChannel:           make(chan model.IJob),
@@ -25,10 +26,12 @@ func NewWorker(workerPool chan IWorker, id int, workerTask func(worker IWorker, 
 		Id:                   id,
 		WorkerStoppedChannel: make(chan bool),
 		WorkerTask:           workerTask,
+		Name:                 name,
 	}
 }
 
 type worker struct {
+	Name                 string
 	WorkerPoolChannel    chan IWorker
 	JobChannel           chan model.IJob
 	Id                   int
@@ -53,6 +56,10 @@ func (worker *worker) GetId() int {
 	return worker.Id
 }
 
+func (worker *worker) GetName() string {
+	return worker.Name
+}
+
 func (worker *worker) GetQuitChannel() chan bool {
 	return worker.QuitChannel
 }
@@ -64,11 +71,16 @@ func (worker *worker) GetWorkerStoppedChannel() chan bool {
 func (worker *worker) Start() {
 	go func(w IWorker) {
 		defer func() {
-			fmt.Println(fmt.Sprintf("workers %d is stopped", w.GetId()))
+
+			if r := recover(); r != nil {
+				fmt.Println("Recovered in Start", r)
+			}
+
+			fmt.Println(fmt.Sprintf("workers %s-%d is stopped", w.GetName(), w.GetId()))
 			w.GetWorkerStoppedChannel() <- true
 		}()
 
-		fmt.Println(fmt.Sprintf("workers %d is starting", w.GetId()))
+		fmt.Println(fmt.Sprintf("workers %s-%d is starting", w.GetName(), w.GetId()))
 
 		for {
 
@@ -79,7 +91,7 @@ func (worker *worker) Start() {
 				w.GetWorkerTask()(w, job)
 			case <-w.GetQuitChannel():
 				if len(w.GetJobChannel()) == 0 {
-					fmt.Println(fmt.Sprintf("workers %d JobChannel is empty", w.GetId()))
+					fmt.Println(fmt.Sprintf("workers %s-%d JobChannel is empty", w.GetName(), w.GetId()))
 					return
 				}
 			}
@@ -89,15 +101,16 @@ func (worker *worker) Start() {
 
 func (worker *worker) Stop(waitGroup *sync.WaitGroup) {
 	go func(w IWorker, wg *sync.WaitGroup) {
-		fmt.Println(fmt.Sprintf("workers %d is stopping", w.GetId()))
+		defer wg.Done()
+
+		fmt.Println(fmt.Sprintf("workers %s-%d is stopping",w.GetName(), w.GetId()))
 
 		for len(w.GetJobChannel()) > 0 {
-			fmt.Println(fmt.Sprintf("workers %d is waiting for JobChannel to be empty", w.GetId()))
+			fmt.Println(fmt.Sprintf("workers %s-%d is waiting for JobChannel to be empty",w.GetName(), w.GetId()))
 		}
 
 		w.GetQuitChannel() <- true
 		<-w.GetWorkerStoppedChannel()
 		close(w.GetJobChannel())
-		wg.Done()
 	}(worker, waitGroup)
 }

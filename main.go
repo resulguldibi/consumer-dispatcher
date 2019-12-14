@@ -17,8 +17,10 @@ import (
 	"time"
 )
 
-var maxWorker, maxQueue int
-var jobDispatcher dispatcher.IDispatcher
+var consumerMaxWorker, consumerMaxQueue int
+var producerMaxWorker, producerMaxQueue int
+var consumerJobDispatcher dispatcher.IDispatcher
+var producerJobDispatcher dispatcher.IDispatcher
 var topic, broker, group string
 
 //region kafka consumer
@@ -50,19 +52,40 @@ func init() {
 		./kafka-console-producer.sh --broker-list localhost:9092 --topic Test_Topic
 	*/
 
-	//maxWorker, _ = strconv.Atoi(os.Getenv("MAX_WORKERS"))
-	//maxQueue, _ = strconv.Atoi(os.Getenv("MAX_QUEUE"))
+	//consumerMaxWorker, _ = strconv.Atoi(os.Getenv("MAX_WORKERS"))
+	//consumerMaxQueue, _ = strconv.Atoi(os.Getenv("MAX_QUEUE"))
 
-	maxWorker = 5
-	maxQueue = 100
+	consumerMaxWorker = 5
+	consumerMaxQueue = 100
+
+	producerMaxWorker = 5
+	producerMaxQueue = 100
 	topic = "Test_Topic2"
 	broker = "localhost:9092"
 	group = "test-group"
-	jobDispatcher = dispatcher.NewDispatcher(maxWorker, maxQueue, func(worker worker.IWorker, job model.IJob) {
+	consumerJobDispatcher = dispatcher.NewDispatcher("consumer", consumerMaxWorker, consumerMaxQueue, func(worker worker.IWorker, job model.IJob) {
 		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("Recovered in Consumer Task", r)
+			}
+
 			job.GetIsCompletedChannel() <- true
 		}()
+
 		fmt.Println(fmt.Sprintf("workers %d is processing job : %v", worker.GetId(), job))
+		time.Sleep(time.Millisecond * 1)
+	})
+
+	producerJobDispatcher = dispatcher.NewDispatcher("producer", producerMaxWorker, producerMaxQueue, func(worker worker.IWorker, job model.IJob) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("Recovered in Producer Task", r)
+			}
+			job.GetIsCompletedChannel() <- true
+		}()
+
+		message := job.GetData().(*consumer.CustomKafkaMessage)
+		kafkaProducer.Produce(message, kafkaProducerMessageChannel, kafkaProducerErrorChannel)
 		time.Sleep(time.Millisecond * 1)
 	})
 
@@ -104,7 +127,8 @@ func init() {
 
 func main() {
 
-	jobDispatcher.Run()
+	consumerJobDispatcher.Run()
+	producerJobDispatcher.Run()
 
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
@@ -124,21 +148,44 @@ func main() {
 			for {
 
 				message := &consumer.CustomKafkaMessage{Value: []byte(strconv.Itoa(index)), Partition: kafka.PartitionAny, Topic: topic}
-				kafkaProducer.Produce(message, kafkaProducerMessageChannel, kafkaProducerErrorChannel)
+				job := &model.Job{Data: message, IsCompletedChannel: make(chan bool)}
+				producerJobDispatcher.GetJobQueueChannel() <- job
+
+				_, ok := <-job.IsCompletedChannel
+				if ok {
+					close(job.IsCompletedChannel)
+				}
 
 				select {
 
+				case err := <-kafkaProducerErrorChannel:
+					fmt.Println("producer error ->", err)
+					_, ok := <-job.IsCompletedChannel
+					if ok {
+						close(job.IsCompletedChannel)
+					}
+
+				case _ = <-kafkaProducerMessageChannel:
+					fmt.Println("producer message ->")
+					_, ok := <-job.IsCompletedChannel
+					if ok {
+						close(job.IsCompletedChannel)
+					}
+
 				case sgnl := <-kafkaProducerSignalChannel:
 					fmt.Println("producer signal : ", sgnl)
+					_, ok := <-job.IsCompletedChannel
+					if ok {
+						close(job.IsCompletedChannel)
+					}
 					return
-				case err := <-kafkaProducerErrorChannel:
-					fmt.Println("produer error ->", err)
-				case _ = <-kafkaProducerMessageChannel:
-					//fmt.Println("message produced ->", message)
-
+				case _, ok := <-job.IsCompletedChannel:
+					fmt.Println("producer job completed ->")
+					if ok {
+						close(job.IsCompletedChannel)
+					}
 				}
 				index++
-
 			}
 		}()
 		<-stoppedChannel
@@ -147,7 +194,7 @@ func main() {
 
 	//kafka message consumer routine
 	go func(waitGroup *sync.WaitGroup) {
-		kafkaConsumer.Consume(kafkaConsumerMessageChannel, kafkaConsumerErrorChannel, kafkaConsumerIgnoreChannel, jobDispatcher.MaxPendingJobCount)
+		kafkaConsumer.Consume(kafkaConsumerMessageChannel, kafkaConsumerErrorChannel, kafkaConsumerIgnoreChannel, consumerJobDispatcher.MaxPendingJobCount)
 		stoppedChannel := make(chan bool)
 		go func() {
 			defer func() {
@@ -160,7 +207,7 @@ func main() {
 					//fmt.Println("message : ", message)
 					job := &model.Job{Payload: model.Payload{
 						Name: string(message.(consumer.ICustomKafkaMessage).GetValue())}, IsCompletedChannel: make(chan bool)}
-					jobDispatcher.GetJobQueueChannel() <- job
+					consumerJobDispatcher.GetJobQueueChannel() <- job
 					<-job.IsCompletedChannel
 					close(job.IsCompletedChannel)
 				case err := <-kafkaConsumerErrorChannel:
@@ -179,7 +226,8 @@ func main() {
 
 	wg.Wait()
 
-	jobDispatcher.Stop()
+	consumerJobDispatcher.Stop()
+	producerJobDispatcher.Stop()
 
 	fmt.Println("process finished...")
 }
