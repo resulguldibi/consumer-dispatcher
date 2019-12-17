@@ -93,12 +93,14 @@ func (d *dispatcher) GetWorkerTask() func(worker worker.IWorker, job model.IJob)
 	return d.WorkerTask
 }
 
+
+
 func NewDispatcher(name string, maxWorkers, maxQueue int, workerTask func(worker worker.IWorker, job model.IJob)) IDispatcher {
 	pool := make(chan worker.IWorker, maxWorkers)
 	jobQueue := make(chan model.IJob, maxQueue)
 	workers := make([]worker.IWorker, 0, maxWorkers)
 	quit := make(chan bool)
-	dispatchingStopped := make(chan bool)
+	dispatcherStoppedChannel := make(chan bool)
 	return &dispatcher{
 		Name:                     name,
 		JobCounter:               &counter{count: 0},
@@ -107,15 +109,17 @@ func NewDispatcher(name string, maxWorkers, maxQueue int, workerTask func(worker
 		MaxWorkers:               maxWorkers,
 		Workers:                  workers,
 		QuitChannel:              quit,
-		DispatcherStoppedChannel: dispatchingStopped,
+		DispatcherStoppedChannel: dispatcherStoppedChannel,
 		WorkerTask:               workerTask,
 	}
 }
 
 func (d *dispatcher) Run() {
 
+	d.Workers = make([]worker.IWorker, 0, d.MaxWorkers)
+
 	for i := 0; i < d.MaxWorkers; i++ {
-		workerInstance := worker.NewWorker(d.WorkerPoolChannel, i,d.Name, d.WorkerTask)
+		workerInstance := worker.NewWorker(d.WorkerPoolChannel, i, d.Name, d.WorkerTask)
 		d.Workers = append(d.Workers, workerInstance)
 		workerInstance.Start()
 	}

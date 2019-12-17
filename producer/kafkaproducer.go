@@ -13,6 +13,7 @@ type IKafkaProducerProvider interface {
 
 type IKafkaProducer interface {
 	Produce(message interface{}, messageChannel chan interface{}, errorChannel chan interface{})
+	Close() error
 }
 
 //region confluent-kafka implementation
@@ -65,6 +66,11 @@ func (c *ConfluentKafkaProducer) Produce(message interface{}, messageChannel cha
 			messageChannel <- producedMessage
 		}
 	}()
+}
+
+func (c *ConfluentKafkaProducer) Close() error{
+	c.producer.Close()
+	return nil
 }
 
 //endregion
@@ -128,6 +134,10 @@ func (c *SaramaKafkaAsyncProducer) Produce(message interface{}, messageChannel c
 	}()
 }
 
+func (c *SaramaKafkaAsyncProducer) Close() error{
+	return c.producer.Close()
+}
+
 //endregion
 
 //region sync producer
@@ -184,6 +194,9 @@ func (c *SaramaKafkaSyncProducer) Produce(message interface{}, messageChannel ch
 	}()
 }
 
+func (c *SaramaKafkaSyncProducer) Close() error{
+	return c.producer.Close()
+}
 //endregion
 
 //endregion

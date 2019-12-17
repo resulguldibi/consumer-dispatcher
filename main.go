@@ -2,13 +2,15 @@ package main
 
 import (
 	"fmt"
-	"github.com/Shopify/sarama"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/labstack/echo"
 	"github.com/resulguldibi/consumer-dispatcher/consumer"
 	"github.com/resulguldibi/consumer-dispatcher/dispatcher"
 	"github.com/resulguldibi/consumer-dispatcher/model"
 	"github.com/resulguldibi/consumer-dispatcher/producer"
+	"github.com/resulguldibi/consumer-dispatcher/server"
 	"github.com/resulguldibi/consumer-dispatcher/worker"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -91,8 +93,8 @@ func init() {
 
 	//region kafka consumer
 	options := make(map[string]interface{})
-	options["config.consumer.offsets.initial"] = sarama.OffsetNewest
-	kafkaConsumerProvider = &consumer.SaramaKafkaConsumerProvider{KafkaConsumerProvider: &consumer.KafkaConsumerProvider{
+	//options["config.consumer.offsets.initial"] = sarama.OffsetNewest
+	kafkaConsumerProvider = &consumer.ConfluentKafkaConsumerProvider{KafkaConsumerProvider: &consumer.KafkaConsumerProvider{
 		KafkaVersion:           "2.3.0",
 		EnableThrottling:       true,
 		MaxPendingMessageCount: 10,
@@ -127,107 +129,231 @@ func init() {
 
 func main() {
 
-	consumerJobDispatcher.Run()
-	producerJobDispatcher.Run()
+	s := server.NewServer()
 
-	wg := &sync.WaitGroup{}
-	wg.Add(2)
+	s.GET("/hello", func(c echo.Context) error {
+		return c.String(http.StatusOK, "Hello, World!")
+	})
 
-	//kafka message producer routine
-	go func(waitGroup *sync.WaitGroup) {
-		stoppedChannel := make(chan bool)
-		go func() {
+	s.POST("/producer/start", func(c echo.Context) error {
+		producerJobDispatcher.Run()
+		return c.JSON(http.StatusOK, &struct {
+			Message string `json:"message"`
+		}{
+			Message: "producer dispatcher stopped successfully",
+		})
+	})
 
-			index := 0
+	s.POST("/consumer/start", func(c echo.Context) error {
+		consumerJobDispatcher.Run()
+		return c.JSON(http.StatusOK, &struct {
+			Message string `json:"message"`
+		}{
+			Message: "consumer dispatcher started successfully",
+		})
+	})
 
-			defer func() {
-				fmt.Println("producer stopped")
-				stoppedChannel <- true
-			}()
 
-			for {
+	s.POST("/producer/stop", func(c echo.Context) error {
+		producerJobDispatcher.Stop()
+		return c.JSON(http.StatusOK, &struct {
+			Message string `json:"message"`
+		}{
+			Message: "producer dispatcher stopped successfully",
+		})
+	})
 
-				message := &consumer.CustomKafkaMessage{Value: []byte(strconv.Itoa(index)), Partition: kafka.PartitionAny, Topic: topic}
-				job := &model.Job{Data: message, IsCompletedChannel: make(chan bool)}
-				producerJobDispatcher.GetJobQueueChannel() <- job
+	s.POST("/consumer/stop", func(c echo.Context) error {
+		consumerJobDispatcher.Stop()
+		return c.JSON(http.StatusOK, &struct {
+			Message string `json:"message"`
+		}{
+			Message: "consumer dispatcher stopped successfully",
+		})
+	})
 
-				_, ok := <-job.IsCompletedChannel
-				if ok {
-					close(job.IsCompletedChannel)
-				}
+	s.POST("/produce", func(c echo.Context) error {
 
-				select {
+		m := new(model.Message)
 
-				case err := <-kafkaProducerErrorChannel:
-					fmt.Println("producer error ->", err)
-					_, ok := <-job.IsCompletedChannel
-					if ok {
-						close(job.IsCompletedChannel)
-					}
+		if err := c.Bind(m); err != nil {
+			return err
+		}
 
-				case _ = <-kafkaProducerMessageChannel:
-					fmt.Println("producer message ->")
-					_, ok := <-job.IsCompletedChannel
-					if ok {
-						close(job.IsCompletedChannel)
-					}
+		message := &consumer.CustomKafkaMessage{Value: []byte(m.Message), Partition: kafka.PartitionAny, Topic: topic}
+		job := &model.Job{Data: message, IsCompletedChannel: make(chan bool)}
+		producerJobDispatcher.GetJobQueueChannel() <- job
 
-				case sgnl := <-kafkaProducerSignalChannel:
-					fmt.Println("producer signal : ", sgnl)
-					_, ok := <-job.IsCompletedChannel
-					if ok {
-						close(job.IsCompletedChannel)
-					}
-					return
-				case _, ok := <-job.IsCompletedChannel:
-					fmt.Println("producer job completed ->")
-					if ok {
-						close(job.IsCompletedChannel)
-					}
-				}
-				index++
+		_, ok := <-job.IsCompletedChannel
+		if ok {
+			close(job.IsCompletedChannel)
+		}
+
+		select {
+
+		case _ = <-kafkaProducerErrorChannel:
+		case _ = <-kafkaProducerMessageChannel:
+		case _ = <-kafkaProducerSignalChannel:
+			_, ok := <-job.IsCompletedChannel
+			if ok {
+				close(job.IsCompletedChannel)
 			}
-		}()
-		<-stoppedChannel
-		waitGroup.Done()
-	}(wg)
-
-	//kafka message consumer routine
-	go func(waitGroup *sync.WaitGroup) {
-		kafkaConsumer.Consume(kafkaConsumerMessageChannel, kafkaConsumerErrorChannel, kafkaConsumerIgnoreChannel, consumerJobDispatcher.MaxPendingJobCount)
-		stoppedChannel := make(chan bool)
-		go func() {
-			defer func() {
-				fmt.Println("consumer stopped")
-				stoppedChannel <- true
-			}()
-			for {
-				select {
-				case message := <-kafkaConsumerMessageChannel:
-					//fmt.Println("message : ", message)
-					job := &model.Job{Payload: model.Payload{
-						Name: string(message.(consumer.ICustomKafkaMessage).GetValue())}, IsCompletedChannel: make(chan bool)}
-					consumerJobDispatcher.GetJobQueueChannel() <- job
-					<-job.IsCompletedChannel
-					close(job.IsCompletedChannel)
-				case err := <-kafkaConsumerErrorChannel:
-					fmt.Println("error : ", err)
-				case ignore := <-kafkaConsumerIgnoreChannel:
-					fmt.Println("ignore : ", ignore)
-				case sgnl := <-kafkaConsumerSignalChannel:
-					fmt.Println("consumer signal : ", sgnl)
-					return
-				}
+		case _, ok := <-job.IsCompletedChannel:
+			if ok {
+				close(job.IsCompletedChannel)
 			}
+		}
+
+		return c.String(http.StatusOK, "record inserted successfully")
+	})
+
+	quit := make(chan os.Signal)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+
+	wgMain := &sync.WaitGroup{}
+	wgMain.Add(2)
+
+	go func(_wgMain *sync.WaitGroup) {
+
+		defer func() {
+			_wgMain.Done()
 		}()
-		<-stoppedChannel
-		waitGroup.Done()
-	}(wg)
 
-	wg.Wait()
+		consumerJobDispatcher.Run()
+		producerJobDispatcher.Run()
 
-	consumerJobDispatcher.Stop()
-	producerJobDispatcher.Stop()
+		wg := &sync.WaitGroup{}
+		wg.Add(2)
 
-	fmt.Println("process finished...")
+		//kafka message producer routine
+		go func(waitGroup *sync.WaitGroup) {
+			stoppedChannel := make(chan bool)
+			go func() {
+				index := 0
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println("Recovered in Producer Routine", r)
+					}
+				}()
+
+				defer func() {
+
+					fmt.Println("producer stopped")
+					//err := kafkaProducer.Close()
+					//if err != nil {
+					//	fmt.Println("kafkaProducer.Close() error ", err)
+					//}
+					stoppedChannel <- true
+				}()
+
+				for {
+
+					message := &consumer.CustomKafkaMessage{Value: []byte(strconv.Itoa(index)), Partition: kafka.PartitionAny, Topic: topic}
+					job := &model.Job{Data: message, IsCompletedChannel: make(chan bool)}
+					producerJobDispatcher.GetJobQueueChannel() <- job
+
+					_, ok := <-job.IsCompletedChannel
+					if ok {
+						close(job.IsCompletedChannel)
+					}
+
+					select {
+
+					case err := <-kafkaProducerErrorChannel:
+						fmt.Println("producer error ->", err)
+						_, ok := <-job.IsCompletedChannel
+						if ok {
+							close(job.IsCompletedChannel)
+						}
+
+					case _ = <-kafkaProducerMessageChannel:
+						_, ok := <-job.IsCompletedChannel
+						if ok {
+							close(job.IsCompletedChannel)
+						}
+
+					case sgnl := <-kafkaProducerSignalChannel:
+						fmt.Println("producer signal : ", sgnl)
+						_, ok := <-job.IsCompletedChannel
+						if ok {
+							close(job.IsCompletedChannel)
+						}
+						return
+
+					case _, ok := <-job.IsCompletedChannel:
+						if ok {
+							close(job.IsCompletedChannel)
+						}
+					}
+					index++
+				}
+			}()
+			<-stoppedChannel
+			waitGroup.Done()
+		}(wg)
+
+		//kafka message consumer routine
+		go func(waitGroup *sync.WaitGroup) {
+			kafkaConsumer.Consume(kafkaConsumerMessageChannel, kafkaConsumerErrorChannel, kafkaConsumerIgnoreChannel, consumerJobDispatcher.MaxPendingJobCount)
+			stoppedChannel := make(chan bool)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println("Recovered in Consumer Routine", r)
+					}
+				}()
+
+				defer func() {
+
+					fmt.Println("consumer stopped")
+					//err := kafkaConsumer.Close()
+					//if err != nil{
+					//	fmt.Println("kafkaConsumer.Close() error ",err)
+					//}
+					stoppedChannel <- true
+				}()
+				for {
+					select {
+					case message := <-kafkaConsumerMessageChannel:
+
+
+						//fmt.Println("message : ", message)
+						job := &model.Job{Payload: model.Payload{
+							Name: string(message.(consumer.ICustomKafkaMessage).GetValue())}, IsCompletedChannel: make(chan bool)}
+						consumerJobDispatcher.GetJobQueueChannel() <- job
+						<-job.IsCompletedChannel
+						close(job.IsCompletedChannel)
+					case err := <-kafkaConsumerErrorChannel:
+						fmt.Println("error : ", err)
+					case ignore := <-kafkaConsumerIgnoreChannel:
+						fmt.Println("ignore : ", ignore)
+					case sgnl := <-kafkaConsumerSignalChannel:
+						fmt.Println("consumer signal : ", sgnl)
+						return
+					}
+				}
+			}()
+			<-stoppedChannel
+			waitGroup.Done()
+		}(wg)
+
+		wg.Wait()
+
+		consumerJobDispatcher.Stop()
+		producerJobDispatcher.Stop()
+
+		fmt.Println("process finished...")
+
+	}(wgMain)
+
+	go func(_wgMain *sync.WaitGroup) {
+		defer func() {
+			_wgMain.Done()
+		}()
+
+		s.Serve(":8080", quit, 10*time.Second)
+	}(wgMain)
+
+	wgMain.Wait()
+	fmt.Println("server stopped")
 }

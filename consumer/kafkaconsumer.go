@@ -31,6 +31,7 @@ type KafkaConsumerProvider struct {
 
 type IKafkaConsumer interface {
 	Consume(messageChannel chan interface{}, errorChannel chan interface{}, ignoreChannel chan interface{}, maxPendingJobCount func() int)
+	Close() error
 }
 
 type KafkaConsumer struct {
@@ -155,6 +156,10 @@ func (c *ConfluentKafkaConsumer) Consume(messageChannel chan interface{}, errorC
 	}()
 }
 
+func (c *ConfluentKafkaConsumer) Close() error {
+	return c.consumer.Close()
+}
+
 //endregion
 
 //region sarama-cluster implementation
@@ -240,6 +245,10 @@ func (c *SaramaClusterConsumer) Consume(messageChannel chan interface{}, errorCh
 		}
 	}()
 
+}
+
+func (c *SaramaClusterConsumer) Close() error {
+	return c.consumer.Close()
 }
 
 //endregion
@@ -374,6 +383,10 @@ func (c *SaramaConsumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 	}
 
 	return nil
+}
+
+func (c *SaramaConsumer) Close() error {
+	return c.consumer.Close()
 }
 
 //endregion
