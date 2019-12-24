@@ -33,6 +33,7 @@ var kafkaConsumerErrorChannel chan interface{}
 var kafkaConsumerIgnoreChannel chan interface{}
 var kafkaConsumerSignalChannel chan os.Signal
 var kafkaConsumerProviderError error
+var consumingLoop bool
 
 //endregion
 
@@ -42,6 +43,8 @@ var kafkaProducer producer.IKafkaProducer
 var kafkaProducerMessageChannel chan interface{}
 var kafkaProducerErrorChannel chan interface{}
 var kafkaProducerSignalChannel chan os.Signal
+var kafkaProducerProviderError error
+var producingLoop bool
 
 //endregion
 
@@ -57,8 +60,8 @@ func init() {
 	//consumerMaxWorker, _ = strconv.Atoi(os.Getenv("MAX_WORKERS"))
 	//consumerMaxQueue, _ = strconv.Atoi(os.Getenv("MAX_QUEUE"))
 
-	consumerMaxWorker = 5
-	consumerMaxQueue = 100
+	consumerMaxWorker = 100
+	consumerMaxQueue = 1000
 
 	producerMaxWorker = 5
 	producerMaxQueue = 100
@@ -96,7 +99,7 @@ func init() {
 	//options["config.consumer.offsets.initial"] = sarama.OffsetNewest
 	kafkaConsumerProvider = &consumer.ConfluentKafkaConsumerProvider{KafkaConsumerProvider: &consumer.KafkaConsumerProvider{
 		KafkaVersion:           "2.3.0",
-		EnableThrottling:       true,
+		EnableThrottling:       false,
 		MaxPendingMessageCount: 10,
 		WaitingTimeMsWhenMaxPendingMessageCountReached: 50,
 		PollTimeoutMS: 100,
@@ -113,16 +116,22 @@ func init() {
 	kafkaConsumerIgnoreChannel = make(chan interface{})
 	kafkaConsumerSignalChannel = make(chan os.Signal, 1)
 	signal.Notify(kafkaConsumerSignalChannel, syscall.SIGINT, syscall.SIGTERM)
+	consumingLoop = true
 	//endregion
 
-	//region kafka consumer
+	//region kafka producer
 	kafkaProducerProvider = &producer.ConfluentKafkaProducerProvider{}
-	kafkaProducer = kafkaProducerProvider.GetKafkaProducer(broker)
+	kafkaProducer, kafkaProducerProviderError = kafkaProducerProvider.GetKafkaProducer(broker)
+
+	if kafkaProducerProviderError != nil {
+		panic(kafkaProducerProviderError)
+	}
+
 	kafkaProducerMessageChannel = make(chan interface{})
 	kafkaProducerErrorChannel = make(chan interface{})
 	kafkaProducerSignalChannel = make(chan os.Signal, 1)
 	signal.Notify(kafkaProducerSignalChannel, syscall.SIGINT, syscall.SIGTERM)
-
+	producingLoop = true
 	//endregion
 
 }
@@ -136,7 +145,7 @@ func main() {
 	})
 
 	s.POST("/producer/start", func(c echo.Context) error {
-		producerJobDispatcher.Run()
+		producingLoop = true
 		return c.JSON(http.StatusOK, &struct {
 			Message string `json:"message"`
 		}{
@@ -145,7 +154,7 @@ func main() {
 	})
 
 	s.POST("/consumer/start", func(c echo.Context) error {
-		consumerJobDispatcher.Run()
+		consumingLoop = true
 		return c.JSON(http.StatusOK, &struct {
 			Message string `json:"message"`
 		}{
@@ -153,9 +162,8 @@ func main() {
 		})
 	})
 
-
 	s.POST("/producer/stop", func(c echo.Context) error {
-		producerJobDispatcher.Stop()
+		producingLoop = false
 		return c.JSON(http.StatusOK, &struct {
 			Message string `json:"message"`
 		}{
@@ -164,7 +172,7 @@ func main() {
 	})
 
 	s.POST("/consumer/stop", func(c echo.Context) error {
-		consumerJobDispatcher.Stop()
+		consumingLoop = false
 		return c.JSON(http.StatusOK, &struct {
 			Message string `json:"message"`
 		}{
@@ -204,7 +212,11 @@ func main() {
 			}
 		}
 
-		return c.String(http.StatusOK, "record inserted successfully")
+		return c.JSON(http.StatusOK, &struct {
+			Message string `json:"message"`
+		}{
+			Message: "record inserted successfully",
+		})
 	})
 
 	quit := make(chan os.Signal)
@@ -237,16 +249,24 @@ func main() {
 				}()
 
 				defer func() {
-
 					fmt.Println("producer stopped")
-					//err := kafkaProducer.Close()
-					//if err != nil {
-					//	fmt.Println("kafkaProducer.Close() error ", err)
-					//}
 					stoppedChannel <- true
 				}()
 
 				for {
+
+					if !producingLoop {
+						select {
+						case sgnl, ok := <-kafkaProducerSignalChannel:
+							if ok {
+								fmt.Println("producer signal (producingLoop) : ", sgnl)
+								return
+							}
+						default:
+							time.Sleep(time.Millisecond * 1000)
+							continue
+						}
+					}
 
 					message := &consumer.CustomKafkaMessage{Value: []byte(strconv.Itoa(index)), Partition: kafka.PartitionAny, Topic: topic}
 					job := &model.Job{Data: message, IsCompletedChannel: make(chan bool)}
@@ -265,13 +285,11 @@ func main() {
 						if ok {
 							close(job.IsCompletedChannel)
 						}
-
 					case _ = <-kafkaProducerMessageChannel:
 						_, ok := <-job.IsCompletedChannel
 						if ok {
 							close(job.IsCompletedChannel)
 						}
-
 					case sgnl := <-kafkaProducerSignalChannel:
 						fmt.Println("producer signal : ", sgnl)
 						_, ok := <-job.IsCompletedChannel
@@ -279,7 +297,6 @@ func main() {
 							close(job.IsCompletedChannel)
 						}
 						return
-
 					case _, ok := <-job.IsCompletedChannel:
 						if ok {
 							close(job.IsCompletedChannel)
@@ -304,18 +321,26 @@ func main() {
 				}()
 
 				defer func() {
-
 					fmt.Println("consumer stopped")
-					//err := kafkaConsumer.Close()
-					//if err != nil{
-					//	fmt.Println("kafkaConsumer.Close() error ",err)
-					//}
 					stoppedChannel <- true
 				}()
 				for {
+
+					if !consumingLoop {
+						select {
+						case sgnl, ok := <-kafkaConsumerSignalChannel:
+							if ok {
+								fmt.Println("consumer signal (consumingLoop) : ", sgnl)
+								return
+							}
+						default:
+							time.Sleep(time.Millisecond * 1000)
+							continue
+						}
+					}
+
 					select {
 					case message := <-kafkaConsumerMessageChannel:
-
 
 						//fmt.Println("message : ", message)
 						job := &model.Job{Payload: model.Payload{

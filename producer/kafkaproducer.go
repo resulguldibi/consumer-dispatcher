@@ -8,7 +8,7 @@ import (
 )
 
 type IKafkaProducerProvider interface {
-	GetKafkaProducer(broker string) IKafkaProducer
+	GetKafkaProducer(broker string) (IKafkaProducer, error)
 }
 
 type IKafkaProducer interface {
@@ -21,16 +21,16 @@ type IKafkaProducer interface {
 type ConfluentKafkaProducerProvider struct {
 }
 
-func (p *ConfluentKafkaProducerProvider) GetKafkaProducer(broker string) IKafkaProducer {
+func (p *ConfluentKafkaProducerProvider) GetKafkaProducer(broker string) (IKafkaProducer, error) {
 	producer, err := kafka.NewProducer(&kafka.ConfigMap{
 		"bootstrap.servers": broker,
 	})
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return &ConfluentKafkaProducer{producer: producer}
+	return &ConfluentKafkaProducer{producer: producer}, nil
 }
 
 type ConfluentKafkaProducer struct {
@@ -68,7 +68,7 @@ func (c *ConfluentKafkaProducer) Produce(message interface{}, messageChannel cha
 	}()
 }
 
-func (c *ConfluentKafkaProducer) Close() error{
+func (c *ConfluentKafkaProducer) Close() error {
 	c.producer.Close()
 	return nil
 }
@@ -81,7 +81,7 @@ func (c *ConfluentKafkaProducer) Close() error{
 type SaramaKafkaAsyncProducerProvider struct {
 }
 
-func (p *SaramaKafkaAsyncProducerProvider) GetKafkaProducer(broker string) IKafkaProducer {
+func (p *SaramaKafkaAsyncProducerProvider) GetKafkaProducer(broker string) (IKafkaProducer, error) {
 
 	config := sarama.NewConfig()
 	config.Producer.Partitioner = sarama.NewRandomPartitioner
@@ -98,10 +98,10 @@ func (p *SaramaKafkaAsyncProducerProvider) GetKafkaProducer(broker string) IKafk
 	producer, err := sarama.NewAsyncProducer(brokers, config)
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return &SaramaKafkaAsyncProducer{producer: producer}
+	return &SaramaKafkaAsyncProducer{producer: producer}, nil
 }
 
 type SaramaKafkaAsyncProducer struct {
@@ -134,7 +134,7 @@ func (c *SaramaKafkaAsyncProducer) Produce(message interface{}, messageChannel c
 	}()
 }
 
-func (c *SaramaKafkaAsyncProducer) Close() error{
+func (c *SaramaKafkaAsyncProducer) Close() error {
 	return c.producer.Close()
 }
 
@@ -145,7 +145,7 @@ func (c *SaramaKafkaAsyncProducer) Close() error{
 type SaramaKafkaSyncProducerProvider struct {
 }
 
-func (p *SaramaKafkaSyncProducerProvider) GetKafkaProducer(broker string) IKafkaProducer {
+func (p *SaramaKafkaSyncProducerProvider) GetKafkaProducer(broker string) (IKafkaProducer, error) {
 
 	config := sarama.NewConfig()
 	config.Producer.Partitioner = sarama.NewRandomPartitioner
@@ -162,10 +162,10 @@ func (p *SaramaKafkaSyncProducerProvider) GetKafkaProducer(broker string) IKafka
 	producer, err := sarama.NewSyncProducer(brokers, config)
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return &SaramaKafkaSyncProducer{producer: producer}
+	return &SaramaKafkaSyncProducer{producer: producer}, nil
 }
 
 type SaramaKafkaSyncProducer struct {
@@ -194,9 +194,10 @@ func (c *SaramaKafkaSyncProducer) Produce(message interface{}, messageChannel ch
 	}()
 }
 
-func (c *SaramaKafkaSyncProducer) Close() error{
+func (c *SaramaKafkaSyncProducer) Close() error {
 	return c.producer.Close()
 }
+
 //endregion
 
 //endregion
