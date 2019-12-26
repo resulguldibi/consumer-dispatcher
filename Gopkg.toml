@@ -34,3 +34,7 @@
 [[constraint]]
   branch = "master"
   name = "github.com/labstack/echo"
+
+[metadata.heroku]
+  root-package = "github.com/resulguldibi/consumer-dispatcher"
+  go-version = "1.12.7"
